@@ -4,20 +4,21 @@ using UnityEngine;
 using UnityEngine.Audio;
 
 /// <summary>
-/// Fires rays from the listener through the baked voxel grid on a background thread.
+/// Fires rays from the listener through the combined voxel grid on a background thread.
 ///
 /// Threading model:
 /// - Main thread copies source/listener positions each frame and signals new work
-/// - Background thread runs continuously, picks up work when signaled
-/// - Result is written to a volatile float — main thread reads and logs it
-/// - VoxelGridData is read-only, no lock needed
-/// - BitArray is copied once at startup and never written — no lock needed
+/// - Background thread snapshots the combined BitArray from DynamismManager,
+///   runs the full DDA raytrace, writes result to volatile float
+/// - Main thread reads result and applies it to the Audio Mixer low-pass filter
 ///
+/// Combined grid = static baked geometry OR dynamic obstacles (managed by DynamismManager).
 /// Muffle Ratio: 0.0 = fully clear, 1.0 = fully blocked.
 /// </summary>
 public class AudioRaytracer : MonoBehaviour
 {
-    private VoxelGridData voxelData;
+    // Set by VoxelVolume.Initialize() — needed for grid dimensions in DDA
+    private VoxelGridData _voxelData;
 
     [Header("Scene Tags")]
     public string sourceTag = "SoundSource";
@@ -43,12 +44,8 @@ public class AudioRaytracer : MonoBehaviour
     private Vector3 _listenerPos;
     private readonly object _posLock = new object();
 
-    // Latest muffle result — volatile ensures main thread always reads the freshest value
     private volatile float _muffleRatio = 1f;
-
-    // Signals background thread that new positions are ready
     private readonly SemaphoreSlim _workSignal = new SemaphoreSlim(0, 1);
-
     private volatile bool _shutdown = false;
 
     // -------------------------------------------------------------------------
@@ -56,7 +53,6 @@ public class AudioRaytracer : MonoBehaviour
     private Transform _source;
     private Transform _listener;
     private Vector3[] _rayDirections;
-    private BitArray _voxelBits;
     private Thread _workerThread;
 
     // -------------------------------------------------------------------------
@@ -77,11 +73,13 @@ public class AudioRaytracer : MonoBehaviour
             _listener = listenerObj.transform;
     }
 
+    /// <summary>
+    /// Called by VoxelVolume after the static grid is ready.
+    /// voxelData is needed for grid dimensions — bits come from DynamismManager.
+    /// </summary>
     public void Initialize(VoxelGridData voxelData)
     {
-        this.voxelData = voxelData;
-        _voxelBits = voxelData.GetBitArray();
-
+        _voxelData = voxelData;
         _rayDirections = GenerateFibonacciSphere(rayCount);
 
         _workerThread = new Thread(RaytraceWorker);
@@ -93,24 +91,19 @@ public class AudioRaytracer : MonoBehaviour
     {
         if (_source == null || _listener == null) return;
 
-        // Copy latest positions for the background thread
         lock (_posLock)
         {
             _sourcePos = _source.position;
             _listenerPos = _listener.position;
         }
 
-        // Signal work — only if the worker isn't already busy
         if (_workSignal.CurrentCount == 0)
             _workSignal.Release();
 
-        // Read and display latest result
         float muffle = _muffleRatio;
         int successCount = Mathf.RoundToInt((1f - muffle) * rayCount);
 
-        // Map muffle ratio to low pass cutoff frequency
-        // 22000 Hz = fully open/clear, 500 Hz = fully muffled
-        float cutoff = Mathf.Lerp(500f, 22000f, 1f - _muffleRatio);
+        float cutoff = Mathf.Lerp(500f, 22000f, 1f - muffle);
         audioMixer.SetFloat("MuffleFrequency", cutoff);
 
         Debug.Log($"[AudioRaytracer] Muffle: {muffle:F3} | " +
@@ -121,7 +114,7 @@ public class AudioRaytracer : MonoBehaviour
     private void OnDestroy()
     {
         _shutdown = true;
-        try { _workSignal.Release(); } catch { } // unblock worker so it can exit cleanly
+        try { _workSignal.Release(); } catch { }
     }
 
     // -------------------------------------------------------------------------
@@ -132,7 +125,6 @@ public class AudioRaytracer : MonoBehaviour
         while (true)
         {
             _workSignal.Wait();
-
             if (_shutdown) break;
 
             Vector3 sourcePos, listenerPos;
@@ -142,13 +134,21 @@ public class AudioRaytracer : MonoBehaviour
                 listenerPos = _listenerPos;
             }
 
-            _muffleRatio = CalculateMuffleRatio(sourcePos, listenerPos);
+            // Snapshot the combined grid — holds lock only for the copy duration,
+            // not the entire raytrace
+            BitArray voxelBits = DynamismManager.Instance != null
+                ? DynamismManager.Instance.SnapshotCombinedBits()
+                : null;
+
+            if (voxelBits == null || _voxelData == null) continue;
+
+            _muffleRatio = CalculateMuffleRatio(sourcePos, listenerPos, voxelBits);
         }
     }
 
     // -------------------------------------------------------------------------
 
-    private float CalculateMuffleRatio(Vector3 sourcePos, Vector3 listenerPos)
+    private float CalculateMuffleRatio(Vector3 sourcePos, Vector3 listenerPos, BitArray voxelBits)
     {
         int successCount = 0;
 
@@ -162,20 +162,20 @@ public class AudioRaytracer : MonoBehaviour
                 DDATraversal.MarchResult march = DDATraversal.March(
                     currentOrigin,
                     direction,
-                    voxelData,
-                    _voxelBits,
+                    _voxelData,
+                    voxelBits,
                     maxStepsPerSegment);
 
                 if (!march.hitSolid)
                     break;
 
-                Vector3 losOrigin = march.hitPoint + march.normal * (voxelData.voxelSize * 0.6f);
+                Vector3 losOrigin = march.hitPoint + march.normal * (_voxelData.voxelSize * 0.6f);
 
                 bool hasLOS = DDATraversal.HasLineOfSight(
                     losOrigin,
                     sourcePos,
-                    voxelData,
-                    _voxelBits,
+                    _voxelData,
+                    voxelBits,
                     maxStepsPerSegment);
 
                 if (hasLOS)
@@ -187,7 +187,7 @@ public class AudioRaytracer : MonoBehaviour
                 if (bounce < maxBounces)
                 {
                     direction = Vector3.Reflect(direction, march.normal);
-                    currentOrigin = march.hitPoint + march.normal * (voxelData.voxelSize * 0.1f);
+                    currentOrigin = march.hitPoint + march.normal * (_voxelData.voxelSize * 0.1f);
                 }
             }
         }

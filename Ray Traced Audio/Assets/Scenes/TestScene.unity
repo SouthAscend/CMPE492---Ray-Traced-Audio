@@ -131,7 +131,7 @@ GameObject:
   - component: {fileID: 24907648}
   - component: {fileID: 24907647}
   - component: {fileID: 24907646}
-  m_Layer: 6
+  m_Layer: 7
   m_Name: Cube (5)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -243,6 +243,7 @@ GameObject:
   - component: {fileID: 54309138}
   - component: {fileID: 54309137}
   - component: {fileID: 54309136}
+  - component: {fileID: 54309139}
   m_Layer: 6
   m_Name: Cube (8)
   m_TagString: Untagged
@@ -343,6 +344,18 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 54309134}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!114 &54309139
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 54309134}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cc92551f017229c4cb2e768f1f206099, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DynamicCubeObstacle
 --- !u!1 &139614062
 GameObject:
   m_ObjectHideFlags: 0
@@ -567,7 +580,7 @@ GameObject:
   - component: {fileID: 277792300}
   - component: {fileID: 277792299}
   - component: {fileID: 277792298}
-  m_Layer: 6
+  m_Layer: 7
   m_Name: Cube (1)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -807,7 +820,7 @@ GameObject:
   - component: {fileID: 392220801}
   - component: {fileID: 392220800}
   - component: {fileID: 392220799}
-  m_Layer: 6
+  m_Layer: 7
   m_Name: Cube (4)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1046,7 +1059,7 @@ GameObject:
   - component: {fileID: 503468627}
   - component: {fileID: 503468626}
   - component: {fileID: 503468625}
-  m_Layer: 6
+  m_Layer: 7
   m_Name: Cube (2)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1242,7 +1255,7 @@ MonoBehaviour:
   voxelSize: 0.05
   obstacleMask:
     serializedVersion: 2
-    m_Bits: 64
+    m_Bits: 128
   createVisuals: 0
   voxelData: {fileID: 11400000, guid: 8e3f95a07825c5f438c7895765fdf6c0, type: 2}
   audioRaytracer: {fileID: 1797350694}
@@ -1258,7 +1271,7 @@ GameObject:
   - component: {fileID: 1316395467}
   - component: {fileID: 1316395466}
   - component: {fileID: 1316395465}
-  m_Layer: 6
+  m_Layer: 7
   m_Name: Cube
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1410,6 +1423,7 @@ GameObject:
   - component: {fileID: 1427862587}
   - component: {fileID: 1427862586}
   - component: {fileID: 1427862585}
+  - component: {fileID: 1427862588}
   m_Layer: 6
   m_Name: Cube (7)
   m_TagString: Untagged
@@ -1510,6 +1524,18 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1427862583}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!114 &1427862588
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1427862583}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cc92551f017229c4cb2e768f1f206099, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DynamicCubeObstacle
 --- !u!1 &1441869217
 GameObject:
   m_ObjectHideFlags: 0
@@ -1522,7 +1548,7 @@ GameObject:
   - component: {fileID: 1441869221}
   - component: {fileID: 1441869220}
   - component: {fileID: 1441869219}
-  m_Layer: 6
+  m_Layer: 7
   m_Name: Cube (3)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1622,6 +1648,50 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1441869217}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!1 &1484762208
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1484762210}
+  - component: {fileID: 1484762209}
+  m_Layer: 0
+  m_Name: DynamismManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1484762209
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1484762208}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3ec35dbca811a594e91d7db0a9a43ea7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DynamismManager
+--- !u!4 &1484762210
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1484762208}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1797350693
 GameObject:
   m_ObjectHideFlags: 0
@@ -1684,6 +1754,7 @@ GameObject:
   - component: {fileID: 1840888716}
   - component: {fileID: 1840888715}
   - component: {fileID: 1840888714}
+  - component: {fileID: 1840888717}
   m_Layer: 6
   m_Name: Cube (6)
   m_TagString: Untagged
@@ -1784,6 +1855,18 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1840888712}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!114 &1840888717
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1840888712}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cc92551f017229c4cb2e768f1f206099, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DynamicCubeObstacle
 --- !u!1 &1976645529
 GameObject:
   m_ObjectHideFlags: 0
@@ -1919,3 +2002,4 @@ SceneRoots:
   - {fileID: 139614066}
   - {fileID: 1976645533}
   - {fileID: 1797350695}
+  - {fileID: 1484762210}

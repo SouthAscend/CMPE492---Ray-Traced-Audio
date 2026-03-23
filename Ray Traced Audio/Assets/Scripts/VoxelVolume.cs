@@ -11,7 +11,6 @@ public class VoxelVolume : MonoBehaviour
     public VoxelGridData voxelData;
     [SerializeField] private AudioRaytracer audioRaytracer;
 
-    // Tags whose colliders are excluded from voxelization
     private static readonly string[] ExcludedTags = { "SoundSource", "SoundListener" };
 
     // -------------------------------------------------------------------------
@@ -39,7 +38,6 @@ public class VoxelVolume : MonoBehaviour
             voxelData.sceneHash = liveHash;
 
 #if UNITY_EDITOR
-            // Persist the new hash and voxel data to the asset on disk
             UnityEditor.EditorUtility.SetDirty(voxelData);
             UnityEditor.AssetDatabase.SaveAssets();
 #endif
@@ -47,11 +45,18 @@ public class VoxelVolume : MonoBehaviour
             Debug.Log("[VoxelVolume] Bake complete.");
         }
 
+        // Hand static grid to DynamismManager — it will also pick up any
+        // DynamicCubeObstacle components already in the scene
+        if (DynamismManager.Instance != null)
+            DynamismManager.Instance.InitializeStatic(voxelData);
+        else
+            Debug.LogWarning("[VoxelVolume] No DynamismManager found in scene. Dynamic obstacles will not work.");
+
+        // Initialize AudioRaytracer — pass voxelData for grid dimensions
         audioRaytracer.Initialize(voxelData);
     }
 
     // -------------------------------------------------------------------------
-    // Core bake logic — called both at runtime (Start) and from the editor button
 
     public void BakeVoxels()
     {
@@ -67,7 +72,6 @@ public class VoxelVolume : MonoBehaviour
             return;
         }
 
-        // Disable excluded-tag colliders so they don't get baked
         List<Collider> disabledColliders = DisableExcludedColliders();
 
         voxelData.gridSize = new Vector3Int(sizeX, sizeY, sizeZ);
@@ -78,53 +82,37 @@ public class VoxelVolume : MonoBehaviour
         Vector3 halfExtents = Vector3.one * (voxelSize / 2f);
 
         for (int z = 0; z < sizeZ; z++)
+        for (int y = 0; y < sizeY; y++)
+        for (int x = 0; x < sizeX; x++)
         {
-            for (int y = 0; y < sizeY; y++)
-            {
-                for (int x = 0; x < sizeX; x++)
-                {
-                    int index = x + y * sizeX + z * sizeX * sizeY;
-                    Vector3 center = voxelData.origin +
-                        new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * voxelSize;
+            int index = x + y * sizeX + z * sizeX * sizeY;
+            Vector3 center = voxelData.origin +
+                new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * voxelSize;
 
-                    tempOccupied[index] = Physics.CheckBox(
-                        center, halfExtents, Quaternion.identity, obstacleMask);
-                }
-            }
+            tempOccupied[index] = Physics.CheckBox(
+                center, halfExtents, Quaternion.identity, obstacleMask);
         }
 
-        // Re-enable excluded colliders
         RestoreColliders(disabledColliders);
 
-        // Pack into BitArray → int[]
         BitArray bits = new BitArray(tempOccupied);
         voxelData.isOccupiedBits = new int[Mathf.CeilToInt((int)totalVoxels / 32f)];
         bits.CopyTo(voxelData.isOccupiedBits, 0);
     }
 
     // -------------------------------------------------------------------------
-    // Hash computation
 
-    /// <summary>
-    /// Computes a hash of all obstacle-layer collider bounds in the scene,
-    /// sorted deterministically by instance ID.
-    /// Only bounds (center + size) are included — material, script, or name
-    /// changes do not affect the hash and will not trigger a rebake.
-    /// </summary>
     public string ComputeSceneHash()
     {
-        // Collect all colliders on the obstacle layer within the volume
         Vector3 gridCenter = transform.position;
         Vector3 gridHalfExtents = transform.localScale / 2f;
 
         Collider[] colliders = Physics.OverlapBox(
             gridCenter, gridHalfExtents, Quaternion.identity, obstacleMask);
 
-        // Build a sorted list by instance ID for determinism
         List<Collider> sorted = new List<Collider>(colliders);
         sorted.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
 
-        // Exclude tagged objects
         HashSet<string> excludedTags = new HashSet<string>(ExcludedTags);
 
         StringBuilder sb = new StringBuilder();
@@ -141,7 +129,6 @@ public class VoxelVolume : MonoBehaviour
               .Append(b.size.z).Append(';');
         }
 
-        // Simple deterministic hash — good enough for cache invalidation
         return sb.ToString().GetHashCode().ToString();
     }
 
@@ -151,17 +138,13 @@ public class VoxelVolume : MonoBehaviour
     {
         List<Collider> disabled = new List<Collider>();
         foreach (string tag in ExcludedTags)
+        foreach (GameObject obj in GameObject.FindGameObjectsWithTag(tag))
+        foreach (Collider col in obj.GetComponentsInChildren<Collider>())
         {
-            foreach (GameObject obj in GameObject.FindGameObjectsWithTag(tag))
+            if (col.enabled)
             {
-                foreach (Collider col in obj.GetComponentsInChildren<Collider>())
-                {
-                    if (col.enabled)
-                    {
-                        col.enabled = false;
-                        disabled.Add(col);
-                    }
-                }
+                col.enabled = false;
+                disabled.Add(col);
             }
         }
         return disabled;
@@ -170,10 +153,7 @@ public class VoxelVolume : MonoBehaviour
     private void RestoreColliders(List<Collider> colliders)
     {
         foreach (Collider col in colliders)
-        {
-            if (col != null)
-                col.enabled = true;
-        }
+            if (col != null) col.enabled = true;
     }
 
     // -------------------------------------------------------------------------
