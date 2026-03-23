@@ -5,10 +5,22 @@ using UnityEngine;
 
 public class VoxelVolume : MonoBehaviour
 {
+    [Header("Voxel Settings")]
     public float voxelSize = 0.5f;
-    public LayerMask obstacleMask;
     public bool createVisuals = true;
     public VoxelGridData voxelData;
+
+    [Header("Layers")]
+    [Tooltip("Static geometry — walls, floors, ceilings. Always baked.")]
+    public LayerMask staticObstacleMask;
+
+    [Tooltip("Enable to support dynamic obstacles at runtime via DynamismManager.")]
+    public bool useDynamicObstacles = false;
+
+    [Tooltip("Dynamic obstacle layer. Only used when useDynamicObstacles is OFF — baked into static grid. " +
+             "When ON, dynamic grid is managed separately by DynamismManager.")]
+    public LayerMask dynamicObstacleMask;
+
     [SerializeField] private AudioRaytracer audioRaytracer;
 
     private static readonly string[] ExcludedTags = { "SoundSource", "SoundListener" };
@@ -41,19 +53,26 @@ public class VoxelVolume : MonoBehaviour
             UnityEditor.EditorUtility.SetDirty(voxelData);
             UnityEditor.AssetDatabase.SaveAssets();
 #endif
-
             Debug.Log("[VoxelVolume] Bake complete.");
         }
 
-        // Hand static grid to DynamismManager — it will also pick up any
-        // DynamicCubeObstacle components already in the scene
-        if (DynamismManager.Instance != null)
-            DynamismManager.Instance.InitializeStatic(voxelData);
-        else
-            Debug.LogWarning("[VoxelVolume] No DynamismManager found in scene. Dynamic obstacles will not work.");
+        if (useDynamicObstacles)
+        {
+            // Hand static grid to DynamismManager — dynamic grid managed separately
+            if (DynamismManager.Instance != null)
+                DynamismManager.Instance.InitializeStatic(voxelData);
+            else
+                Debug.LogWarning("[VoxelVolume] useDynamicObstacles is ON but no DynamismManager found in scene.");
 
-        // Initialize AudioRaytracer — pass voxelData for grid dimensions
-        audioRaytracer.Initialize(voxelData);
+            // AudioRaytracer reads combined bits from DynamismManager each cycle
+            audioRaytracer.InitializeDynamic(voxelData);
+        }
+        else
+        {
+            // Static only — pass BitArray directly, no DynamismManager involved
+            BitArray staticBits = voxelData.GetBitArray();
+            audioRaytracer.InitializeStatic(voxelData, staticBits);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -78,6 +97,12 @@ public class VoxelVolume : MonoBehaviour
         voxelData.voxelSize = voxelSize;
         voxelData.origin = transform.position - (transform.localScale / 2f);
 
+        // When dynamic is OFF, bake both layers together into one grid
+        // When dynamic is ON, bake static layer only — dynamic grid handled at runtime
+        LayerMask bakeMask = useDynamicObstacles
+            ? staticObstacleMask
+            : staticObstacleMask | dynamicObstacleMask;
+
         bool[] tempOccupied = new bool[(int)totalVoxels];
         Vector3 halfExtents = Vector3.one * (voxelSize / 2f);
 
@@ -90,7 +115,7 @@ public class VoxelVolume : MonoBehaviour
                 new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * voxelSize;
 
             tempOccupied[index] = Physics.CheckBox(
-                center, halfExtents, Quaternion.identity, obstacleMask);
+                center, halfExtents, Quaternion.identity, bakeMask);
         }
 
         RestoreColliders(disabledColliders);
@@ -107,8 +132,12 @@ public class VoxelVolume : MonoBehaviour
         Vector3 gridCenter = transform.position;
         Vector3 gridHalfExtents = transform.localScale / 2f;
 
+        // Hash includes both layers regardless of mode —
+        // any geometry change in either layer should invalidate the cache
+        LayerMask hashMask = staticObstacleMask | dynamicObstacleMask;
+
         Collider[] colliders = Physics.OverlapBox(
-            gridCenter, gridHalfExtents, Quaternion.identity, obstacleMask);
+            gridCenter, gridHalfExtents, Quaternion.identity, hashMask);
 
         List<Collider> sorted = new List<Collider>(colliders);
         sorted.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
@@ -126,7 +155,8 @@ public class VoxelVolume : MonoBehaviour
               .Append(b.center.z).Append(',')
               .Append(b.size.x).Append(',')
               .Append(b.size.y).Append(',')
-              .Append(b.size.z).Append(';');
+              .Append(b.size.z).Append(',')
+              .Append(voxelSize).Append(';');
         }
 
         return sb.ToString().GetHashCode().ToString();

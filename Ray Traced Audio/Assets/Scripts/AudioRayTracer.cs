@@ -4,20 +4,22 @@ using UnityEngine;
 using UnityEngine.Audio;
 
 /// <summary>
-/// Fires rays from the listener through the combined voxel grid on a background thread.
+/// Fires rays from the listener through the voxel grid on a background thread.
 ///
-/// Threading model:
-/// - Main thread copies source/listener positions each frame and signals new work
-/// - Background thread snapshots the combined BitArray from DynamismManager,
-///   runs the full DDA raytrace, writes result to volatile float
-/// - Main thread reads result and applies it to the Audio Mixer low-pass filter
+/// Two modes set by VoxelVolume at startup:
 ///
-/// Combined grid = static baked geometry OR dynamic obstacles (managed by DynamismManager).
+///   Static mode  (useDynamicObstacles = OFF):
+///     Reads a single BitArray cached at startup. No locks, no copies, no overhead.
+///     Fastest possible — use for fully static scenes.
+///
+///   Dynamic mode (useDynamicObstacles = ON):
+///     Snapshots the combined BitArray from DynamismManager each raytrace cycle.
+///     Supports runtime obstacle changes at a small per-cycle cost.
+///
 /// Muffle Ratio: 0.0 = fully clear, 1.0 = fully blocked.
 /// </summary>
 public class AudioRaytracer : MonoBehaviour
 {
-    // Set by VoxelVolume.Initialize() — needed for grid dimensions in DDA
     private VoxelGridData _voxelData;
 
     [Header("Scene Tags")]
@@ -38,7 +40,15 @@ public class AudioRaytracer : MonoBehaviour
     public AudioMixer audioMixer;
 
     // -------------------------------------------------------------------------
-    // Shared state between main thread and background thread
+    // Mode
+
+    private bool _isDynamic = false;
+
+    // Static mode — cached once, never changes, no lock needed
+    private BitArray _staticBits;
+
+    // -------------------------------------------------------------------------
+    // Threading
 
     private Vector3 _sourcePos;
     private Vector3 _listenerPos;
@@ -47,8 +57,6 @@ public class AudioRaytracer : MonoBehaviour
     private volatile float _muffleRatio = 1f;
     private readonly SemaphoreSlim _workSignal = new SemaphoreSlim(0, 1);
     private volatile bool _shutdown = false;
-
-    // -------------------------------------------------------------------------
 
     private Transform _source;
     private Transform _listener;
@@ -74,18 +82,43 @@ public class AudioRaytracer : MonoBehaviour
     }
 
     /// <summary>
-    /// Called by VoxelVolume after the static grid is ready.
-    /// voxelData is needed for grid dimensions — bits come from DynamismManager.
+    /// Static mode initialization — called by VoxelVolume when useDynamicObstacles is OFF.
+    /// BitArray is cached directly, no DynamismManager involved.
     /// </summary>
-    public void Initialize(VoxelGridData voxelData)
+    public void InitializeStatic(VoxelGridData voxelData, BitArray staticBits)
     {
         _voxelData = voxelData;
+        _staticBits = staticBits;
+        _isDynamic = false;
+
         _rayDirections = GenerateFibonacciSphere(rayCount);
 
         _workerThread = new Thread(RaytraceWorker);
         _workerThread.IsBackground = true;
         _workerThread.Start();
+
+        Debug.Log("[AudioRaytracer] Initialized in STATIC mode.");
     }
+
+    /// <summary>
+    /// Dynamic mode initialization — called by VoxelVolume when useDynamicObstacles is ON.
+    /// Bits are snapshotted from DynamismManager each raytrace cycle.
+    /// </summary>
+    public void InitializeDynamic(VoxelGridData voxelData)
+    {
+        _voxelData = voxelData;
+        _isDynamic = true;
+
+        _rayDirections = GenerateFibonacciSphere(rayCount);
+
+        _workerThread = new Thread(RaytraceWorker);
+        _workerThread.IsBackground = true;
+        _workerThread.Start();
+
+        Debug.Log("[AudioRaytracer] Initialized in DYNAMIC mode.");
+    }
+
+    // -------------------------------------------------------------------------
 
     private void Update()
     {
@@ -118,7 +151,6 @@ public class AudioRaytracer : MonoBehaviour
     }
 
     // -------------------------------------------------------------------------
-    // Background thread
 
     private void RaytraceWorker()
     {
@@ -134,15 +166,22 @@ public class AudioRaytracer : MonoBehaviour
                 listenerPos = _listenerPos;
             }
 
-            // Snapshot the combined grid — holds lock only for the copy duration,
-            // not the entire raytrace
-            BitArray voxelBits = DynamismManager.Instance != null
-                ? DynamismManager.Instance.SnapshotCombinedBits()
-                : null;
+            // Resolve which bits to use based on mode
+            BitArray bits;
+            if (_isDynamic)
+            {
+                if (DynamismManager.Instance == null) continue;
+                bits = DynamismManager.Instance.SnapshotCombinedBits();
+            }
+            else
+            {
+                // Static — use cached bits directly, no copy needed
+                bits = _staticBits;
+            }
 
-            if (voxelBits == null || _voxelData == null) continue;
+            if (bits == null || _voxelData == null) continue;
 
-            _muffleRatio = CalculateMuffleRatio(sourcePos, listenerPos, voxelBits);
+            _muffleRatio = CalculateMuffleRatio(sourcePos, listenerPos, bits);
         }
     }
 

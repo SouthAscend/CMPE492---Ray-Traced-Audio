@@ -76,7 +76,7 @@ public class DynamismManager : MonoBehaviour
         }
 
         // Find any DynamicCubeObstacles already in the scene
-        IDynamicObstacle[] found = FindObjectsOfType<DynamicCubeObstacle>();
+        IDynamicObstacle[] found = FindObjectsByType<DynamicCubeObstacle>(FindObjectsSortMode.None);
         foreach (IDynamicObstacle obs in found)
             RegisterDynamic(obs);
 
