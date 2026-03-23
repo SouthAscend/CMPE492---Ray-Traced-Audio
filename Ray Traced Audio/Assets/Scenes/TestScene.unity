@@ -757,8 +757,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.34422988, y: 0.6170373, z: -0.3430987, w: 0.6189137}
-  m_LocalPosition: {x: -7.1795244, y: 11.621513, z: -0.52915573}
+  m_LocalRotation: {x: 0.3998382, y: 0.5808608, z: -0.39376798, w: 0.58964145}
+  m_LocalPosition: {x: -4.444941, y: 11.219469, z: -0.5230177}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1253,11 +1253,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VoxelVolume
   voxelSize: 0.05
-  obstacleMask:
-    serializedVersion: 2
-    m_Bits: 128
   createVisuals: 0
   voxelData: {fileID: 11400000, guid: 8e3f95a07825c5f438c7895765fdf6c0, type: 2}
+  staticObstacleMask:
+    serializedVersion: 2
+    m_Bits: 128
+  useDynamicObstacles: 1
+  dynamicObstacleMask:
+    serializedVersion: 2
+    m_Bits: 64
   audioRaytracer: {fileID: 1797350694}
 --- !u!1 &1316395464
 GameObject:
@@ -2008,7 +2012,7 @@ MonoBehaviour:
   collisionRadius: 0.2
   collisionMask:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 192
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

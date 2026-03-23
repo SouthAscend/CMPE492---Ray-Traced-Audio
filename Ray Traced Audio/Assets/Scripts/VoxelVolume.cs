@@ -134,7 +134,9 @@ public class VoxelVolume : MonoBehaviour
 
         // Hash includes both layers regardless of mode —
         // any geometry change in either layer should invalidate the cache
-        LayerMask hashMask = staticObstacleMask | dynamicObstacleMask;
+        LayerMask hashMask = useDynamicObstacles
+            ? staticObstacleMask
+            : staticObstacleMask | dynamicObstacleMask;
 
         Collider[] colliders = Physics.OverlapBox(
             gridCenter, gridHalfExtents, Quaternion.identity, hashMask);

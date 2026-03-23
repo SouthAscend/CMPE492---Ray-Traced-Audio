@@ -11,28 +11,26 @@ using UnityEngine;
 /// Produces a combined grid (static OR dynamic) for AudioRaytracer.
 /// Combined is only rebuilt when the dynamic grid actually changes.
 ///
-/// Thread-safe: AudioRaytracer background thread reads combined via ReadCombinedBits().
+/// Thread-safe: AudioRaytracer background thread reads combined via SnapshotCombinedBits().
 /// </summary>
 public class DynamismManager : MonoBehaviour
 {
     public static DynamismManager Instance { get; private set; }
 
-    // Set by VoxelVolume after bake — grid dimensions shared by both grids
     private VoxelGridData _grid;
 
-    // Static grid — int[] from baked asset, read-only, never touched at runtime
+    // Static grid — defensive copy of baked int[], never modified
     private int[] _staticInts;
 
-    // Dynamic grid — int[] maintained via OBB math
+    // Dynamic grid — modified via OBB math at runtime
     private int[] _dynamicInts;
 
-    // Combined = static OR dynamic — rebuilt when dynamic changes
+    // Combined = static OR dynamic
     private int[] _combinedInts;
     private BitArray _combinedBits;
     private readonly object _combinedLock = new object();
     private bool _combinedDirty = false;
 
-    // Registered dynamic obstacles and their last known voxel occupancy
     private class DynamicEntry
     {
         public IDynamicObstacle obstacle;
@@ -55,28 +53,34 @@ public class DynamismManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Called by VoxelVolume after bake. Initializes both grids and
-    /// scans the scene for any DynamicCubeObstacle components.
+    /// Called by VoxelVolume after bake when useDynamicObstacles is ON.
+    /// Makes a defensive copy of the static int[] so external changes
+    /// to the asset never corrupt our working data.
     /// </summary>
     public void InitializeStatic(VoxelGridData grid)
     {
         _grid = grid;
-        _staticInts = grid.isOccupiedBits;
 
-        int intCount = _staticInts.Length;
+        int intCount = grid.isOccupiedBits.Length;
+
+        // Defensive copy — _staticInts is fully independent of the asset
+        _staticInts = new int[intCount];
+        System.Array.Copy(grid.isOccupiedBits, _staticInts, intCount);
+
         _dynamicInts = new int[intCount];
         _combinedInts = new int[intCount];
 
-        // Initial combined is just the static grid (dynamic is empty)
+        // Initial combined = static only (dynamic is empty)
         System.Array.Copy(_staticInts, _combinedInts, intCount);
 
+        // Build initial combined BitArray — must be ready before first snapshot
         lock (_combinedLock)
         {
             _combinedBits = new BitArray(_combinedInts);
         }
 
         // Find any DynamicCubeObstacles already in the scene
-        IDynamicObstacle[] found = FindObjectsByType<DynamicCubeObstacle>(FindObjectsSortMode.None);
+        DynamicCubeObstacle[] found = FindObjectsByType<DynamicCubeObstacle>(FindObjectsSortMode.None);
         foreach (IDynamicObstacle obs in found)
             RegisterDynamic(obs);
 
@@ -87,9 +91,8 @@ public class DynamismManager : MonoBehaviour
 
     public void RegisterDynamic(IDynamicObstacle obstacle)
     {
-        if (_grid == null) return; // not initialized yet — OnEnable fired too early
+        if (_grid == null) return;
 
-        // Avoid duplicates
         foreach (DynamicEntry e in _dynamicEntries)
             if (e.obstacle == obstacle) return;
 
@@ -99,7 +102,6 @@ public class DynamismManager : MonoBehaviour
             lastBounds = obstacle.GetWorldBounds()
         };
 
-        // Immediately fill voxels for this obstacle
         entry.occupiedIndices = obstacle.GetOccupiedVoxelIndices(_grid);
         SetDynamicBits(entry.occupiedIndices, true);
 
@@ -113,7 +115,6 @@ public class DynamismManager : MonoBehaviour
         {
             if (_dynamicEntries[i].obstacle == obstacle)
             {
-                // Clear voxels this obstacle was occupying
                 SetDynamicBits(_dynamicEntries[i].occupiedIndices, false);
                 _dynamicEntries.RemoveAt(i);
                 _combinedDirty = true;
@@ -132,26 +133,20 @@ public class DynamismManager : MonoBehaviour
         {
             DynamicEntry entry = _dynamicEntries[i];
 
-            // Cast to MonoBehaviour to access hasChanged
-            // IDynamicObstacle is always a MonoBehaviour in practice
             MonoBehaviour mb = entry.obstacle as MonoBehaviour;
             if (mb == null || !mb.transform.hasChanged) continue;
 
-            // Clear old voxels
             SetDynamicBits(entry.occupiedIndices, false);
 
-            // Compute new voxels
             entry.occupiedIndices = entry.obstacle.GetOccupiedVoxelIndices(_grid);
             entry.lastBounds = entry.obstacle.GetWorldBounds();
 
-            // Fill new voxels
             SetDynamicBits(entry.occupiedIndices, true);
 
             mb.transform.hasChanged = false;
             _combinedDirty = true;
         }
 
-        // Rebuild combined only when something actually changed
         if (_combinedDirty)
         {
             RebuildCombined();
@@ -162,14 +157,13 @@ public class DynamismManager : MonoBehaviour
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Thread-safe read accessor for AudioRaytracer background thread.
-    /// Takes a snapshot copy so the lock is held for the minimum time.
+    /// Thread-safe snapshot for AudioRaytracer background thread.
+    /// Copies under lock so the background thread reads a consistent state.
     /// </summary>
     public BitArray SnapshotCombinedBits()
     {
         lock (_combinedLock)
         {
-            // Return a copy so the background thread can read freely without holding the lock
             return new BitArray(_combinedBits);
         }
     }
@@ -178,7 +172,6 @@ public class DynamismManager : MonoBehaviour
 
     private void RebuildCombined()
     {
-        // Bitwise OR at the int level — 32 voxels per operation
         for (int i = 0; i < _combinedInts.Length; i++)
             _combinedInts[i] = _staticInts[i] | _dynamicInts[i];
 
