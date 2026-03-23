@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Threading;
 using UnityEngine;
+using UnityEngine.Audio;
 
 /// <summary>
 /// Fires rays from the listener through the baked voxel grid on a background thread.
@@ -31,6 +32,9 @@ public class AudioRaytracer : MonoBehaviour
 
     [Tooltip("Max voxel steps per ray segment.")]
     public int maxStepsPerSegment = 500;
+
+    [Header("Audio Settings")]
+    public AudioMixer audioMixer;
 
     // -------------------------------------------------------------------------
     // Shared state between main thread and background thread
@@ -103,6 +107,11 @@ public class AudioRaytracer : MonoBehaviour
         // Read and display latest result
         float muffle = _muffleRatio;
         int successCount = Mathf.RoundToInt((1f - muffle) * rayCount);
+
+        // Map muffle ratio to low pass cutoff frequency
+        // 22000 Hz = fully open/clear, 500 Hz = fully muffled
+        float cutoff = Mathf.Lerp(500f, 22000f, 1f - _muffleRatio);
+        audioMixer.SetFloat("MuffleFrequency", cutoff);
 
         Debug.Log($"[AudioRaytracer] Muffle: {muffle:F3} | " +
                   $"Rays succeeded: {successCount}/{rayCount} | " +
