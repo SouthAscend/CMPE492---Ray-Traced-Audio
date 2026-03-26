@@ -2,11 +2,12 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
-/// Simple top-down WASD controller using the new Unity Input System.
+/// Top-down WASD controller using CharacterController.
 /// Movement is relative to the camera's orientation, Y component flattened to 0.
-/// No physics, no gravity, no acceleration.
-/// Uses Physics.CheckSphere to prevent moving into solid geometry.
+/// CharacterController handles wall sliding naturally — no manual collision checks needed.
+/// No gravity, no forces, no acceleration.
 /// </summary>
+[RequireComponent(typeof(CharacterController))]
 public class TopDownController : MonoBehaviour
 {
     [Header("Movement")]
@@ -16,13 +17,12 @@ public class TopDownController : MonoBehaviour
     [Tooltip("The camera to use for direction reference. Defaults to Camera.main if not assigned.")]
     public Camera referenceCamera;
 
-    [Header("Collision")]
-    [Tooltip("Radius of the collision check sphere. Should match roughly half the object's width.")]
-    public float collisionRadius = 0.3f;
-    public LayerMask collisionMask;
+    private CharacterController _cc;
 
     private void Start()
     {
+        _cc = GetComponent<CharacterController>();
+
         if (referenceCamera == null)
             referenceCamera = Camera.main;
     }
@@ -42,7 +42,6 @@ public class TopDownController : MonoBehaviour
 
         if (h == 0f && v == 0f) return;
 
-        // Get camera forward and right, flattened to the horizontal plane
         Vector3 camForward = referenceCamera.transform.forward;
         Vector3 camRight = referenceCamera.transform.right;
 
@@ -54,11 +53,7 @@ public class TopDownController : MonoBehaviour
 
         Vector3 direction = (camForward * v + camRight * h).normalized;
 
-        Vector3 nextPosition = transform.position + direction * moveSpeed * Time.deltaTime;
-
-        if (!Physics.CheckSphere(nextPosition, collisionRadius, collisionMask))
-        {
-            transform.position = nextPosition;
-        }
+        // CharacterController.Move handles wall sliding internally
+        _cc.Move(direction * moveSpeed * Time.deltaTime);
     }
 }

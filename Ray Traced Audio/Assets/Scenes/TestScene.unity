@@ -367,7 +367,6 @@ GameObject:
   - component: {fileID: 139614066}
   - component: {fileID: 139614065}
   - component: {fileID: 139614064}
-  - component: {fileID: 139614063}
   - component: {fileID: 139614067}
   m_Layer: 0
   m_Name: Sound Source
@@ -376,29 +375,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!136 &139614063
-CapsuleCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 139614062}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 2
-  m_Radius: 0.5
-  m_Height: 2
-  m_Direction: 1
-  m_Center: {x: 0, y: 0, z: 0}
 --- !u!23 &139614064
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -1854,7 +1830,7 @@ MonoBehaviour:
   sourceTag: SoundSource
   listenerTag: SoundListener
   rayCount: 512
-  maxBounces: 3
+  maxBounces: 5
   maxStepsPerSegment: 500
   audioMixer: {fileID: 24100000, guid: 1bfe111b73fc6c84fa3a14d3cee6206d, type: 2}
 --- !u!4 &1797350695
@@ -2011,6 +1987,7 @@ GameObject:
   - component: {fileID: 1976645530}
   - component: {fileID: 1976645534}
   - component: {fileID: 1976645535}
+  - component: {fileID: 1976645536}
   m_Layer: 0
   m_Name: Sound Listener
   m_TagString: SoundListener
@@ -2135,10 +2112,31 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::TopDownController
   moveSpeed: 5
   referenceCamera: {fileID: 330585545}
-  collisionRadius: 0.2
-  collisionMask:
+--- !u!143 &1976645536
+CharacterController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1976645529}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
     serializedVersion: 2
-    m_Bits: 192
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Height: 2
+  m_Radius: 0.4
+  m_SlopeLimit: 45
+  m_StepOffset: 0.3
+  m_SkinWidth: 0.08
+  m_MinMoveDistance: 0.001
+  m_Center: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

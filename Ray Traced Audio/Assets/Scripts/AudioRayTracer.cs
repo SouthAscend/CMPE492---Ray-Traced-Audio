@@ -6,15 +6,18 @@ using UnityEngine.Audio;
 /// <summary>
 /// Fires rays from the listener through the voxel grid on a background thread.
 ///
+/// Ray contribution system:
+///   - Rays continue bouncing until maxBounces regardless of LOS success
+///   - Each bounce n contributes 2^(maxBounces - n) to successSum if LOS to source is clear
+///   - Total possible per ray = 2^maxBounces - 1 (precomputed)
+///   - Total possible overall = rayCount * (2^maxBounces - 1)
+///   - Integer accumulation until final division — no rounding error
+///   - Empty room = all rays succeed all bounces = muffle 0 guaranteed
+///   - Sealed room = no ray ever succeeds = muffle 1 guaranteed
+///
 /// Two modes set by VoxelVolume at startup:
-///
-///   Static mode  (useDynamicObstacles = OFF):
-///     Reads a single BitArray cached at startup. No locks, no copies, no overhead.
-///     Fastest possible — use for fully static scenes.
-///
-///   Dynamic mode (useDynamicObstacles = ON):
-///     Snapshots the combined BitArray from DynamismManager each raytrace cycle.
-///     Supports runtime obstacle changes at a small per-cycle cost.
+///   Static  (useDynamicObstacles = OFF): reads cached BitArray directly, zero overhead
+///   Dynamic (useDynamicObstacles = ON):  snapshots combined BitArray from DynamismManager
 ///
 /// Muffle Ratio: 0.0 = fully clear, 1.0 = fully blocked.
 /// </summary>
@@ -30,7 +33,7 @@ public class AudioRaytracer : MonoBehaviour
     [Tooltip("Number of rays fired per update.")]
     public int rayCount = 512;
 
-    [Tooltip("How many times a ray can bounce before being discarded.")]
+    [Tooltip("How many times a ray bounces. Every bounce gets a chance to check LOS.")]
     public int maxBounces = 5;
 
     [Tooltip("Max voxel steps per ray segment.")]
@@ -43,9 +46,16 @@ public class AudioRaytracer : MonoBehaviour
     // Mode
 
     private bool _isDynamic = false;
-
-    // Static mode — cached once, never changes, no lock needed
     private BitArray _staticBits;
+
+    // -------------------------------------------------------------------------
+    // Precomputed contribution values
+
+    // _bounceContributions[n-1] = 2^(maxBounces - n) for bounce n (1-indexed)
+    private long[] _bounceContributions;
+
+    // Maximum possible successSum = rayCount * (2^maxBounces - 1)
+    private long _totalPossible;
 
     // -------------------------------------------------------------------------
     // Threading
@@ -81,41 +91,39 @@ public class AudioRaytracer : MonoBehaviour
             _listener = listenerObj.transform;
     }
 
-    /// <summary>
-    /// Static mode initialization — called by VoxelVolume when useDynamicObstacles is OFF.
-    /// BitArray is cached directly, no DynamismManager involved.
-    /// </summary>
     public void InitializeStatic(VoxelGridData voxelData, BitArray staticBits)
     {
         _voxelData = voxelData;
         _staticBits = staticBits;
         _isDynamic = false;
-
-        _rayDirections = GenerateFibonacciSphere(rayCount);
-
-        _workerThread = new Thread(RaytraceWorker);
-        _workerThread.IsBackground = true;
-        _workerThread.Start();
-
+        InitializeShared();
         Debug.Log("[AudioRaytracer] Initialized in STATIC mode.");
     }
 
-    /// <summary>
-    /// Dynamic mode initialization — called by VoxelVolume when useDynamicObstacles is ON.
-    /// Bits are snapshotted from DynamismManager each raytrace cycle.
-    /// </summary>
     public void InitializeDynamic(VoxelGridData voxelData)
     {
         _voxelData = voxelData;
         _isDynamic = true;
+        InitializeShared();
+        Debug.Log("[AudioRaytracer] Initialized in DYNAMIC mode.");
+    }
 
+    private void InitializeShared()
+    {
         _rayDirections = GenerateFibonacciSphere(rayCount);
+
+        // Precompute bounce contributions — bounce n contributes 2^(maxBounces - n)
+        // Bounce 1 (first hit) gets highest weight, bounce maxBounces gets 1
+        _bounceContributions = new long[maxBounces];
+        for (int n = 1; n <= maxBounces; n++)
+            _bounceContributions[n - 1] = 1L << (maxBounces - n);
+
+        // Total possible = rayCount * (2^maxBounces - 1)
+        _totalPossible = (long)rayCount * ((1L << maxBounces) - 1);
 
         _workerThread = new Thread(RaytraceWorker);
         _workerThread.IsBackground = true;
         _workerThread.Start();
-
-        Debug.Log("[AudioRaytracer] Initialized in DYNAMIC mode.");
     }
 
     // -------------------------------------------------------------------------
@@ -134,14 +142,10 @@ public class AudioRaytracer : MonoBehaviour
             _workSignal.Release();
 
         float muffle = _muffleRatio;
-        int successCount = Mathf.RoundToInt((1f - muffle) * rayCount);
-
         float cutoff = Mathf.Lerp(500f, 22000f, 1f - muffle);
         audioMixer.SetFloat("MuffleFrequency", cutoff);
 
-        Debug.Log($"[AudioRaytracer] Muffle: {muffle:F3} | " +
-                  $"Rays succeeded: {successCount}/{rayCount} | " +
-                  $"Clarity: {(1f - muffle) * 100f:F1}%");
+        Debug.Log($"[AudioRaytracer] Muffle: {muffle:F3} | Clarity: {(1f - muffle) * 100f:F1}%");
     }
 
     private void OnDestroy()
@@ -166,7 +170,6 @@ public class AudioRaytracer : MonoBehaviour
                 listenerPos = _listenerPos;
             }
 
-            // Resolve which bits to use based on mode
             BitArray bits;
             if (_isDynamic)
             {
@@ -175,7 +178,6 @@ public class AudioRaytracer : MonoBehaviour
             }
             else
             {
-                // Static — use cached bits directly, no copy needed
                 bits = _staticBits;
             }
 
@@ -189,14 +191,14 @@ public class AudioRaytracer : MonoBehaviour
 
     private float CalculateMuffleRatio(Vector3 sourcePos, Vector3 listenerPos, BitArray voxelBits)
     {
-        int successCount = 0;
+        long successSum = 0;
 
         for (int i = 0; i < _rayDirections.Length; i++)
         {
             Vector3 direction = _rayDirections[i];
             Vector3 currentOrigin = listenerPos;
 
-            for (int bounce = 0; bounce <= maxBounces; bounce++)
+            for (int bounce = 1; bounce <= maxBounces; bounce++)
             {
                 DDATraversal.MarchResult march = DDATraversal.March(
                     currentOrigin,
@@ -205,6 +207,7 @@ public class AudioRaytracer : MonoBehaviour
                     voxelBits,
                     maxStepsPerSegment);
 
+                // Ray escaped the grid — no more surfaces to bounce off
                 if (!march.hitSolid)
                     break;
 
@@ -218,20 +221,15 @@ public class AudioRaytracer : MonoBehaviour
                     maxStepsPerSegment);
 
                 if (hasLOS)
-                {
-                    successCount++;
-                    break;
-                }
+                    successSum += _bounceContributions[bounce - 1];
 
-                if (bounce < maxBounces)
-                {
-                    direction = Vector3.Reflect(direction, march.normal);
-                    currentOrigin = march.hitPoint + march.normal * (_voxelData.voxelSize * 0.1f);
-                }
+                // Always reflect and continue — even after a successful LOS
+                direction = Vector3.Reflect(direction, march.normal);
+                currentOrigin = march.hitPoint + march.normal * (_voxelData.voxelSize * 0.1f);
             }
         }
 
-        return 1f - (float)successCount / rayCount;
+        return 1f - (float)successSum / _totalPossible;
     }
 
     // -------------------------------------------------------------------------
