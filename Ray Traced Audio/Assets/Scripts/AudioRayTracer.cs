@@ -9,11 +9,11 @@ using UnityEngine.Audio;
 /// Ray contribution system:
 ///   - Rays continue bouncing until maxBounces regardless of LOS success
 ///   - Each bounce n contributes 2^(maxBounces - n) to successSum if LOS to source is clear
-///   - Total possible per ray = 2^maxBounces - 1 (precomputed)
-///   - Total possible overall = rayCount * (2^maxBounces - 1)
+///   - maxPossible is accumulated at runtime — only bounces that actually hit a surface
+///     count toward the denominator. Rays that escape the grid without hitting anything
+///     are excluded entirely, correctly handling open worlds and outdoor environments.
+///   - If no ray hits any surface (fully open world), muffle = 0
 ///   - Integer accumulation until final division — no rounding error
-///   - Empty room = all rays succeed all bounces = muffle 0 guaranteed
-///   - Sealed room = no ray ever succeeds = muffle 1 guaranteed
 ///
 /// Two modes set by VoxelVolume at startup:
 ///   Static  (useDynamicObstacles = OFF): reads cached BitArray directly, zero overhead
@@ -49,13 +49,9 @@ public class AudioRaytracer : MonoBehaviour
     private BitArray _staticBits;
 
     // -------------------------------------------------------------------------
-    // Precomputed contribution values
-
+    // Precomputed per-bounce contribution weights
     // _bounceContributions[n-1] = 2^(maxBounces - n) for bounce n (1-indexed)
     private long[] _bounceContributions;
-
-    // Maximum possible successSum = rayCount * (2^maxBounces - 1)
-    private long _totalPossible;
 
     // -------------------------------------------------------------------------
     // Threading
@@ -64,7 +60,7 @@ public class AudioRaytracer : MonoBehaviour
     private Vector3 _listenerPos;
     private readonly object _posLock = new object();
 
-    private volatile float _muffleRatio = 1f;
+    private volatile float _muffleRatio = 0f;
     private readonly SemaphoreSlim _workSignal = new SemaphoreSlim(0, 1);
     private volatile bool _shutdown = false;
 
@@ -113,13 +109,9 @@ public class AudioRaytracer : MonoBehaviour
         _rayDirections = GenerateFibonacciSphere(rayCount);
 
         // Precompute bounce contributions — bounce n contributes 2^(maxBounces - n)
-        // Bounce 1 (first hit) gets highest weight, bounce maxBounces gets 1
         _bounceContributions = new long[maxBounces];
         for (int n = 1; n <= maxBounces; n++)
             _bounceContributions[n - 1] = 1L << (maxBounces - n);
-
-        // Total possible = rayCount * (2^maxBounces - 1)
-        _totalPossible = (long)rayCount * ((1L << maxBounces) - 1);
 
         _workerThread = new Thread(RaytraceWorker);
         _workerThread.IsBackground = true;
@@ -192,6 +184,7 @@ public class AudioRaytracer : MonoBehaviour
     private float CalculateMuffleRatio(Vector3 sourcePos, Vector3 listenerPos, BitArray voxelBits)
     {
         long successSum = 0;
+        long maxPossible = 0;
 
         for (int i = 0; i < _rayDirections.Length; i++)
         {
@@ -207,9 +200,15 @@ public class AudioRaytracer : MonoBehaviour
                     voxelBits,
                     maxStepsPerSegment);
 
-                // Ray escaped the grid — no more surfaces to bounce off
+                // Ray escaped the grid without hitting anything —
+                // this bounce and all remaining bounces are excluded from the denominator
                 if (!march.hitSolid)
                     break;
+
+                // This bounce hit a surface — it counts toward the denominator
+                // regardless of whether LOS to the source succeeds
+                long weight = _bounceContributions[bounce - 1];
+                maxPossible += weight;
 
                 Vector3 losOrigin = march.hitPoint + march.normal * (_voxelData.voxelSize * 0.6f);
 
@@ -221,15 +220,18 @@ public class AudioRaytracer : MonoBehaviour
                     maxStepsPerSegment);
 
                 if (hasLOS)
-                    successSum += _bounceContributions[bounce - 1];
+                    successSum += weight;
 
-                // Always reflect and continue — even after a successful LOS
                 direction = Vector3.Reflect(direction, march.normal);
                 currentOrigin = march.hitPoint + march.normal * (_voxelData.voxelSize * 0.1f);
             }
         }
 
-        return 1f - (float)successSum / _totalPossible;
+        // No ray hit any surface — fully open environment, no muffle
+        if (maxPossible == 0)
+            return 0f;
+
+        return 1f - (float)successSum / maxPossible;
     }
 
     // -------------------------------------------------------------------------

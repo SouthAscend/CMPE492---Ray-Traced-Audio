@@ -1359,7 +1359,7 @@ MonoBehaviour:
   staticObstacleMask:
     serializedVersion: 2
     m_Bits: 128
-  useDynamicObstacles: 1
+  useDynamicObstacles: 0
   dynamicObstacleMask:
     serializedVersion: 2
     m_Bits: 64
