@@ -1359,7 +1359,7 @@ MonoBehaviour:
   staticObstacleMask:
     serializedVersion: 2
     m_Bits: 128
-  useDynamicObstacles: 0
+  useDynamicObstacles: 1
   dynamicObstacleMask:
     serializedVersion: 2
     m_Bits: 64
@@ -1833,6 +1833,12 @@ MonoBehaviour:
   maxBounces: 5
   maxStepsPerSegment: 500
   audioMixer: {fileID: 24100000, guid: 1bfe111b73fc6c84fa3a14d3cee6206d, type: 2}
+  minDecayTime: 0.1
+  maxDecayTime: 3
+  minReverbDelay: 0
+  maxReverbDelay: 0.1
+  minReflectDelay: 0
+  maxReflectDelay: 0.05
 --- !u!4 &1797350695
 Transform:
   m_ObjectHideFlags: 0

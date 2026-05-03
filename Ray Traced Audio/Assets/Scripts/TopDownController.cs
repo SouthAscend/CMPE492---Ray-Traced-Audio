@@ -19,6 +19,9 @@ public class TopDownController : MonoBehaviour
 
     private CharacterController _cc;
 
+    public static bool MuffleEnabled = true;
+    public static bool EchoEnabled = true;
+
     private void Start()
     {
         _cc = GetComponent<CharacterController>();
@@ -31,6 +34,12 @@ public class TopDownController : MonoBehaviour
     {
         Keyboard kb = Keyboard.current;
         if (kb == null) return;
+
+        if (kb.digit1Key.wasPressedThisFrame)
+            MuffleEnabled = !MuffleEnabled;
+
+        if (kb.digit2Key.wasPressedThisFrame)
+            EchoEnabled = !EchoEnabled;
 
         float h = 0f;
         float v = 0f;

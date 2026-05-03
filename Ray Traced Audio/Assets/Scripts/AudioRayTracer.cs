@@ -42,6 +42,21 @@ public class AudioRaytracer : MonoBehaviour
     [Header("Audio Settings")]
     public AudioMixer audioMixer;
 
+    [Header("Reverb Settings")]
+    [Tooltip("Min/Max decay time in seconds mapped to short/long travel distance.")]
+    public float minDecayTime = 0.1f;
+    public float maxDecayTime = 3.0f;
+
+    [Tooltip("Min/Max reverb delay in seconds.")]
+    public float minReverbDelay = 0.0f;
+    public float maxReverbDelay = 0.1f;
+
+    [Tooltip("Min/Max reflect delay in seconds.")]
+    public float minReflectDelay = 0.0f;
+    public float maxReflectDelay = 0.05f;
+
+    public float delayMultiplier = 1f;
+
     // -------------------------------------------------------------------------
     // Mode
 
@@ -61,6 +76,8 @@ public class AudioRaytracer : MonoBehaviour
     private readonly object _posLock = new object();
 
     private volatile float _muffleRatio = 0f;
+    private volatile float _reverbRoom = -10000f;
+    private volatile float _reverbDelay = 0f;
     private readonly SemaphoreSlim _workSignal = new SemaphoreSlim(0, 1);
     private volatile bool _shutdown = false;
 
@@ -68,6 +85,8 @@ public class AudioRaytracer : MonoBehaviour
     private Transform _listener;
     private Vector3[] _rayDirections;
     private Thread _workerThread;
+
+    private float _maxExpectedRoomSize;
 
     // -------------------------------------------------------------------------
 
@@ -113,6 +132,11 @@ public class AudioRaytracer : MonoBehaviour
         for (int n = 1; n <= maxBounces; n++)
             _bounceContributions[n - 1] = 1L << (maxBounces - n);
 
+        _maxExpectedRoomSize = new Vector3(
+            _voxelData.gridSize.x * _voxelData.voxelSize,
+            _voxelData.gridSize.y * _voxelData.voxelSize,
+            _voxelData.gridSize.z * _voxelData.voxelSize).magnitude;
+
         _workerThread = new Thread(RaytraceWorker);
         _workerThread.IsBackground = true;
         _workerThread.Start();
@@ -137,7 +161,28 @@ public class AudioRaytracer : MonoBehaviour
         float cutoff = Mathf.Lerp(500f, 22000f, 1f - muffle);
         audioMixer.SetFloat("MuffleFrequency", cutoff);
 
-        Debug.Log($"[AudioRaytracer] Muffle: {muffle:F3} | Clarity: {(1f - muffle) * 100f:F1}%");
+        audioMixer.SetFloat("ReverbRoom", _reverbRoom);
+        audioMixer.SetFloat("ReverbDelay", _reverbDelay);
+
+        string muffleStr = TopDownController.MuffleEnabled
+            ? $"Muffle: {muffle:F3} | Clarity: {(1f - muffle) * 100f:F1}%"
+            : "Muffle: Disabled";
+
+        string echoStr = TopDownController.EchoEnabled
+            ? $"Reverb Room: {_reverbRoom:F1} mB | Reverb Delay: {_reverbDelay:F3} s"
+            : "Echo: Disabled";
+
+        Debug.Log($"[AudioRaytracer] {muffleStr} | {echoStr}");
+
+
+        if (!TopDownController.MuffleEnabled)
+            audioMixer.SetFloat("MuffleFrequency", 22000f);
+
+        if (!TopDownController.EchoEnabled)
+        {
+            audioMixer.SetFloat("ReverbRoom", -10000f);
+            audioMixer.SetFloat("ReverbDelay", minReverbDelay);
+        }
     }
 
     private void OnDestroy()
@@ -175,16 +220,28 @@ public class AudioRaytracer : MonoBehaviour
 
             if (bits == null || _voxelData == null) continue;
 
-            _muffleRatio = CalculateMuffleRatio(sourcePos, listenerPos, bits);
+            var result = CalculateAudioProperties(sourcePos, listenerPos, bits);
+            _muffleRatio = result.muffle;
+            _reverbRoom = result.reverbRoom;
+            _reverbDelay = result.reverbDelay;
         }
     }
 
     // -------------------------------------------------------------------------
 
-    private float CalculateMuffleRatio(Vector3 sourcePos, Vector3 listenerPos, BitArray voxelBits)
+    private struct AudioResult
+    {
+        public float muffle;
+        public float reverbRoom;
+        public float reverbDelay;
+    }
+
+    private AudioResult CalculateAudioProperties(Vector3 sourcePos, Vector3 listenerPos, BitArray voxelBits)
     {
         long successSum = 0;
         long maxPossible = 0;
+        long echoSuccessCount = 0;
+        float totalEchoDistance = 0f;
 
         for (int i = 0; i < _rayDirections.Length; i++)
         {
@@ -212,26 +269,47 @@ public class AudioRaytracer : MonoBehaviour
 
                 Vector3 losOrigin = march.hitPoint + march.normal * (_voxelData.voxelSize * 0.6f);
 
-                bool hasLOS = DDATraversal.HasLineOfSight(
-                    losOrigin,
-                    sourcePos,
-                    _voxelData,
-                    voxelBits,
-                    maxStepsPerSegment);
+                if (TopDownController.MuffleEnabled)
+                {
+                    bool hasLOS = DDATraversal.HasLineOfSight(
+                        losOrigin, sourcePos, _voxelData, voxelBits, maxStepsPerSegment);
+                    if (hasLOS)
+                        successSum += weight;
+                }
 
-                if (hasLOS)
-                    successSum += weight;
+                if (TopDownController.EchoEnabled)
+                {
+                    bool hasEchoLOS = DDATraversal.HasLineOfSight(
+                        losOrigin, listenerPos, _voxelData, voxelBits, maxStepsPerSegment);
+                    if (hasEchoLOS)
+                    {
+                        echoSuccessCount++;
+                        totalEchoDistance += Vector3.Distance(currentOrigin, march.hitPoint);
+                    }
+                }
 
                 direction = Vector3.Reflect(direction, march.normal);
                 currentOrigin = march.hitPoint + march.normal * (_voxelData.voxelSize * 0.1f);
             }
         }
 
-        // No ray hit any surface — fully open environment, no muffle
         if (maxPossible == 0)
-            return 0f;
+            return new AudioResult { muffle = 0f, reverbRoom = -10000f, reverbDelay = minReverbDelay };
 
-        return 1f - (float)successSum / maxPossible;
+        float muffle = 1f - (float)successSum / maxPossible;
+
+        float echoRatio = (float)echoSuccessCount / (_rayDirections.Length * maxBounces);
+        float avgDistance = echoSuccessCount > 0 ? totalEchoDistance / echoSuccessCount : 0f;
+
+        float room = Mathf.Lerp(-10000f, 0f, echoRatio);
+        float reverbDelay = Mathf.Min(delayMultiplier * avgDistance / 343f, 0.1f);
+
+        return new AudioResult
+        {
+            muffle = muffle,
+            reverbRoom = room,
+            reverbDelay = reverbDelay,
+        };
     }
 
     // -------------------------------------------------------------------------

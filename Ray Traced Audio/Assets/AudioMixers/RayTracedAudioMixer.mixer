@@ -1,5 +1,47 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!244 &-2029955299235161369
+AudioMixerEffectController:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: 
+  m_EffectID: 0e71d6592d3cd51449228bb9e5ce8530
+  m_EffectName: SFX Reverb
+  m_MixLevel: 6f96f46a8f277cf44a2ccdad17e7f702
+  m_Parameters:
+  - m_ParameterName: Dry Level
+    m_GUID: 69dbfdee5ac4d0d41a0a0eaed4952d6f
+  - m_ParameterName: Room
+    m_GUID: 3211eb1a47459cb4d86d78e1b7556e23
+  - m_ParameterName: Room HF
+    m_GUID: 04b1c36783f09fb4d90c5b1aabd2a5b5
+  - m_ParameterName: Decay Time
+    m_GUID: 573f7f8435d1a8c41a98645a16a5c78b
+  - m_ParameterName: Decay HF Ratio
+    m_GUID: 26034efa7496cc6439abcc0c56be5053
+  - m_ParameterName: Reflections
+    m_GUID: 5401780f8e54e8642abb215f80c8acd7
+  - m_ParameterName: Reflect Delay
+    m_GUID: 5da36d49eadb2124cb7d28833e348bf1
+  - m_ParameterName: Reverb
+    m_GUID: 4e5d1c1cc5678a449a15cc13df2f1ba1
+  - m_ParameterName: Reverb Delay
+    m_GUID: ed30f6c79651b7044a196f886b224359
+  - m_ParameterName: Diffusion
+    m_GUID: 0adfdcd28bcfd154ba7ae4df6583e245
+  - m_ParameterName: Density
+    m_GUID: 0012caf2c23bf9c4eb46273ecdcfb31b
+  - m_ParameterName: HF Reference
+    m_GUID: e7a3c2ea57da5f5409243bcf90b65d59
+  - m_ParameterName: Room LF
+    m_GUID: 391513204749552419ff448c19f0a75a
+  - m_ParameterName: LF Reference
+    m_GUID: 587674ed44b4f584f9dcbf0bff483211
+  m_SendTarget: {fileID: 0}
+  m_EnableWetMix: 0
+  m_Bypass: 0
 --- !u!241 &24100000
 AudioMixerController:
   m_ObjectHideFlags: 0
@@ -18,6 +60,10 @@ AudioMixerController:
   m_ExposedParameters:
   - guid: 8f5c05ba39e403749b278d0672f63869
     name: MuffleFrequency
+  - guid: 3211eb1a47459cb4d86d78e1b7556e23
+    name: ReverbRoom
+  - guid: ed30f6c79651b7044a196f886b224359
+    name: ReverbDelay
   m_AudioMixerGroupViews:
   - guids:
     - e821aca1279217d4a80dc2ee89a28e8f
@@ -40,6 +86,7 @@ AudioMixerGroupController:
   m_Effects:
   - {fileID: 24400004}
   - {fileID: 3679778239881237609}
+  - {fileID: -2029955299235161369}
   m_UserColorIndex: 0
   m_Mute: 0
   m_Solo: 0
