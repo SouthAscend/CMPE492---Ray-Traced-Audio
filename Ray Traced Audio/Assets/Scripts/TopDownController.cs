@@ -21,6 +21,7 @@ public class TopDownController : MonoBehaviour
 
     public static bool MuffleEnabled = true;
     public static bool EchoEnabled = true;
+    public static bool PermeationEnabled = true;
 
     private void Start()
     {
@@ -40,6 +41,9 @@ public class TopDownController : MonoBehaviour
 
         if (kb.digit2Key.wasPressedThisFrame)
             EchoEnabled = !EchoEnabled;
+
+        if (kb.digit3Key.wasPressedThisFrame)
+            PermeationEnabled = !PermeationEnabled;
 
         float h = 0f;
         float v = 0f;

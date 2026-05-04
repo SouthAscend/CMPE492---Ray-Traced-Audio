@@ -1840,7 +1840,8 @@ MonoBehaviour:
   minReflectDelay: 0
   maxReflectDelay: 0.05
   delayMultiplier: 1
-  absorptionCoefficient: 7.5
+  absorptionCoefficient: 10
+  muffleCurveCoefficient: 3
 --- !u!4 &1797350695
 Transform:
   m_ObjectHideFlags: 0

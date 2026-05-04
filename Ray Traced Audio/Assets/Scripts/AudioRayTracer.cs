@@ -60,6 +60,9 @@ public class AudioRaytracer : MonoBehaviour
     [Tooltip("Energy lost per meter of solid material. Higher = thicker effective walls.")]
     public float absorptionCoefficient = 10f;
 
+    [Tooltip("Multiplier for the muffle curve. Higher = more aggressive compression.")]
+    public float muffleCurveCoefficient = 2.5f;
+
     // -------------------------------------------------------------------------
     // Mode
 
@@ -168,7 +171,7 @@ public class AudioRaytracer : MonoBehaviour
         audioMixer.SetFloat("ReverbDelay", _reverbDelay);
 
         string muffleStr = TopDownController.MuffleEnabled
-            ? $"Muffle: {muffle:F3} | Clarity: {(1f - muffle) * 100f:F1}%"
+            ? $"Muffle: {muffle:F3} | Clarity: {(1f - muffle) * 100f:F1}% | Permeation: {(TopDownController.PermeationEnabled ? "On" : "Off")}"
             : "Muffle: Disabled";
 
         string echoStr = TopDownController.EchoEnabled
@@ -274,9 +277,14 @@ public class AudioRaytracer : MonoBehaviour
 
                 if (TopDownController.MuffleEnabled)
                 {
-                    float permeation = DDATraversal.GetPermeationFactor(
-                        losOrigin, sourcePos, _voxelData, voxelBits,
-                        maxStepsPerSegment, absorptionCoefficient);
+                    float permeation = TopDownController.PermeationEnabled
+                        ? DDATraversal.GetPermeationFactor(
+                            losOrigin, sourcePos, _voxelData, voxelBits,
+                            maxStepsPerSegment, absorptionCoefficient)
+                        : (DDATraversal.HasLineOfSight(
+                            losOrigin, sourcePos, _voxelData, voxelBits,
+                            maxStepsPerSegment) ? 1f : 0f);
+
                     successSum += (long)(weight * permeation);
                 }
 
@@ -300,6 +308,7 @@ public class AudioRaytracer : MonoBehaviour
             return new AudioResult { muffle = 0f, reverbRoom = -10000f, reverbDelay = minReverbDelay };
 
         float muffle = 1f - (float)successSum / maxPossible;
+        muffle = Mathf.Pow(muffle, muffleCurveCoefficient);
 
         float echoRatio = (float)echoSuccessCount / (_rayDirections.Length * maxBounces);
         float avgDistance = echoSuccessCount > 0 ? totalEchoDistance / echoSuccessCount : 0f;
