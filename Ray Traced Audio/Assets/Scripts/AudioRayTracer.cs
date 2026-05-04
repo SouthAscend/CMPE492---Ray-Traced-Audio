@@ -57,6 +57,9 @@ public class AudioRaytracer : MonoBehaviour
 
     public float delayMultiplier = 1f;
 
+    [Tooltip("Energy lost per meter of solid material. Higher = thicker effective walls.")]
+    public float absorptionCoefficient = 10f;
+
     // -------------------------------------------------------------------------
     // Mode
 
@@ -271,10 +274,10 @@ public class AudioRaytracer : MonoBehaviour
 
                 if (TopDownController.MuffleEnabled)
                 {
-                    bool hasLOS = DDATraversal.HasLineOfSight(
-                        losOrigin, sourcePos, _voxelData, voxelBits, maxStepsPerSegment);
-                    if (hasLOS)
-                        successSum += weight;
+                    float permeation = DDATraversal.GetPermeationFactor(
+                        losOrigin, sourcePos, _voxelData, voxelBits,
+                        maxStepsPerSegment, absorptionCoefficient);
+                    successSum += (long)(weight * permeation);
                 }
 
                 if (TopDownController.EchoEnabled)

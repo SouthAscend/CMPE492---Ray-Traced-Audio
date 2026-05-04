@@ -186,4 +186,85 @@ public static class DDATraversal
 
         return false;
     }
+
+    public static float GetPermeationFactor(
+        Vector3 from,
+        Vector3 to,
+        VoxelGridData grid,
+        BitArray voxelBits,
+        int maxSteps,
+        float absorptionCoefficient)
+    {
+        Vector3 direction = (to - from).normalized;
+        float totalDistance = Vector3.Distance(from, to);
+
+        Vector3 local = from - grid.origin;
+
+        int x = Mathf.FloorToInt(local.x / grid.voxelSize);
+        int y = Mathf.FloorToInt(local.y / grid.voxelSize);
+        int z = Mathf.FloorToInt(local.z / grid.voxelSize);
+
+        Vector3Int targetVoxel = new Vector3Int(
+            Mathf.FloorToInt((to.x - grid.origin.x) / grid.voxelSize),
+            Mathf.FloorToInt((to.y - grid.origin.y) / grid.voxelSize),
+            Mathf.FloorToInt((to.z - grid.origin.z) / grid.voxelSize));
+
+        int stepX = direction.x >= 0 ? 1 : -1;
+        int stepY = direction.y >= 0 ? 1 : -1;
+        int stepZ = direction.z >= 0 ? 1 : -1;
+
+        float deltaX = direction.x != 0 ? Mathf.Abs(grid.voxelSize / direction.x) : float.MaxValue;
+        float deltaY = direction.y != 0 ? Mathf.Abs(grid.voxelSize / direction.y) : float.MaxValue;
+        float deltaZ = direction.z != 0 ? Mathf.Abs(grid.voxelSize / direction.z) : float.MaxValue;
+
+        float nextBoundX = direction.x >= 0 ? (x + 1) * grid.voxelSize : x * grid.voxelSize;
+        float nextBoundY = direction.y >= 0 ? (y + 1) * grid.voxelSize : y * grid.voxelSize;
+        float nextBoundZ = direction.z >= 0 ? (z + 1) * grid.voxelSize : z * grid.voxelSize;
+
+        float tMaxX = direction.x != 0 ? (nextBoundX - local.x) / direction.x : float.MaxValue;
+        float tMaxY = direction.y != 0 ? (nextBoundY - local.y) / direction.y : float.MaxValue;
+        float tMaxZ = direction.z != 0 ? (nextBoundZ - local.z) / direction.z : float.MaxValue;
+
+        float tCurrent = 0f;
+        float solidDistance = 0f;
+
+        for (int i = 0; i < maxSteps; i++)
+        {
+            if (x == targetVoxel.x && y == targetVoxel.y && z == targetVoxel.z)
+                break;
+
+            if (x < 0 || x >= grid.gridSize.x ||
+                y < 0 || y >= grid.gridSize.y ||
+                z < 0 || z >= grid.gridSize.z)
+                break;
+
+            if (tCurrent > totalDistance)
+                break;
+
+            int index = x + y * grid.gridSize.x + z * grid.gridSize.x * grid.gridSize.y;
+            if (voxelBits[index])
+                solidDistance += grid.voxelSize;
+
+            if (tMaxX < tMaxY && tMaxX < tMaxZ)
+            {
+                tCurrent = tMaxX;
+                x += stepX;
+                tMaxX += deltaX;
+            }
+            else if (tMaxY < tMaxZ)
+            {
+                tCurrent = tMaxY;
+                y += stepY;
+                tMaxY += deltaY;
+            }
+            else
+            {
+                tCurrent = tMaxZ;
+                z += stepZ;
+                tMaxZ += deltaZ;
+            }
+        }
+
+        return Mathf.Exp(-solidDistance * absorptionCoefficient);
+    }
 }
