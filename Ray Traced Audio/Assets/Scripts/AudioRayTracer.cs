@@ -201,9 +201,9 @@ public class AudioRaytracer : MonoBehaviour
             ? $"Reverb Room: {_reverbRoom:F1} mB | Reverb Delay: {_reverbDelay:F3} s"
             : "Echo: Disabled";
 
-        #if UNITY_EDITOR
+#if UNITY_EDITOR
         Debug.Log($"[AudioRaytracer] {muffleStr} | {echoStr}");
-        #endif
+#endif
     }
 
     private void OnDestroy()
@@ -272,6 +272,9 @@ public class AudioRaytracer : MonoBehaviour
         float totalEchoDistance = 0f;
         Vector3 weightedDirSum = Vector3.zero;
         float totalDirWeight = 0f;
+        float effectiveProximityRadius = Vector3.Distance(sourcePos, listenerPos) <= sourceProximityRadius
+            ? 0f
+            : sourceProximityRadius;
 
         Vector3 directDir = (sourcePos - listenerPos).normalized;
         var successfulDirs = new System.Collections.Generic.List<Vector4>();
@@ -290,7 +293,7 @@ public class AudioRaytracer : MonoBehaviour
                     voxelBits,
                     maxStepsPerSegment,
                     sourcePos,
-                    sourceProximityRadius);
+                    effectiveProximityRadius);
 
                 // Ray escaped — no more bounces possible
                 if (march.escaped)

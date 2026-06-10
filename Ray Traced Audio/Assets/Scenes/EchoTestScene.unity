@@ -4801,7 +4801,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 64
   audioRaytracer: {fileID: 1797350694}
-  use2DMode: 0
+  use2DMode: 1
 --- !u!1 &1216250880
 GameObject:
   m_ObjectHideFlags: 0
@@ -5883,7 +5883,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1523234386}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -5901,7 +5901,7 @@ AudioSource:
   serializedVersion: 4
   OutputAudioMixerGroup: {fileID: 24300002, guid: 1bfe111b73fc6c84fa3a14d3cee6206d, type: 2}
   m_audioClip: {fileID: 0}
-  m_Resource: {fileID: 8300000, guid: cd05200f5ad939548b9221f1ee44dc3f, type: 3}
+  m_Resource: {fileID: 0}
   m_PlayOnAwake: 1
   m_Volume: 1
   m_Pitch: 1
