@@ -23,6 +23,9 @@ public class VoxelVolume : MonoBehaviour
 
     [SerializeField] private AudioRaytracer audioRaytracer;
 
+    [Tooltip("When enabled, only bakes a single Y slice at listener height.")]
+    public bool use2DMode = false;
+
     private static readonly string[] ExcludedTags = { "SoundSource", "SoundListener" };
 
     // -------------------------------------------------------------------------
@@ -65,12 +68,14 @@ public class VoxelVolume : MonoBehaviour
                 Debug.LogWarning("[VoxelVolume] useDynamicObstacles is ON but no DynamismManager found in scene.");
 
             // AudioRaytracer reads combined bits from DynamismManager each cycle
+            audioRaytracer._use2DMode = use2DMode;
             audioRaytracer.InitializeDynamic(voxelData);
         }
         else
         {
             // Static only — pass BitArray directly, no DynamismManager involved
             BitArray staticBits = voxelData.GetBitArray();
+            audioRaytracer._use2DMode = use2DMode;
             audioRaytracer.InitializeStatic(voxelData, staticBits);
         }
     }
@@ -81,8 +86,29 @@ public class VoxelVolume : MonoBehaviour
     {
         Vector3 scale = transform.localScale;
         int sizeX = Mathf.CeilToInt(scale.x / voxelSize);
-        int sizeY = Mathf.CeilToInt(scale.y / voxelSize);
         int sizeZ = Mathf.CeilToInt(scale.z / voxelSize);
+
+        int sizeY;
+        int sliceY = 0;
+
+        if (use2DMode)
+        {
+            sizeY = 1;
+            GameObject listenerObj = GameObject.FindWithTag("SoundListener");
+            if (listenerObj == null)
+            {
+                Debug.LogError("[VoxelVolume] 2D mode requires a SoundListener tagged object.");
+                return;
+            }
+            Vector3 origin2D = transform.position - (transform.localScale / 2f);
+            sliceY = Mathf.FloorToInt((listenerObj.transform.position.y - origin2D.y) / voxelSize);
+            sliceY = Mathf.Clamp(sliceY, 0, Mathf.CeilToInt(scale.y / voxelSize) - 1);
+        }
+        else
+        {
+            sizeY = Mathf.CeilToInt(scale.y / voxelSize);
+        }
+
         long totalVoxels = (long)sizeX * sizeY * sizeZ;
 
         if (totalVoxels > int.MaxValue)
@@ -93,12 +119,14 @@ public class VoxelVolume : MonoBehaviour
 
         List<Collider> disabledColliders = DisableExcludedColliders();
 
+        Vector3 gridOrigin = transform.position - (transform.localScale / 2f);
+
         voxelData.gridSize = new Vector3Int(sizeX, sizeY, sizeZ);
         voxelData.voxelSize = voxelSize;
-        voxelData.origin = transform.position - (transform.localScale / 2f);
+        voxelData.origin = use2DMode
+            ? new Vector3(gridOrigin.x, gridOrigin.y + sliceY * voxelSize, gridOrigin.z)
+            : gridOrigin;
 
-        // When dynamic is OFF, bake both layers together into one grid
-        // When dynamic is ON, bake static layer only — dynamic grid handled at runtime
         LayerMask bakeMask = useDynamicObstacles
             ? staticObstacleMask
             : staticObstacleMask | dynamicObstacleMask;
@@ -106,16 +134,32 @@ public class VoxelVolume : MonoBehaviour
         bool[] tempOccupied = new bool[(int)totalVoxels];
         Vector3 halfExtents = Vector3.one * (voxelSize / 2f);
 
-        for (int z = 0; z < sizeZ; z++)
-        for (int y = 0; y < sizeY; y++)
-        for (int x = 0; x < sizeX; x++)
+        if (use2DMode)
         {
-            int index = x + y * sizeX + z * sizeX * sizeY;
-            Vector3 center = voxelData.origin +
-                new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * voxelSize;
+            for (int z = 0; z < sizeZ; z++)
+                for (int x = 0; x < sizeX; x++)
+                {
+                    int index = x + 0 * sizeX + z * sizeX * 1;
+                    Vector3 center = gridOrigin +
+                        new Vector3(x + 0.5f, sliceY + 0.5f, z + 0.5f) * voxelSize;
 
-            tempOccupied[index] = Physics.CheckBox(
-                center, halfExtents, Quaternion.identity, bakeMask);
+                    tempOccupied[index] = Physics.CheckBox(
+                        center, halfExtents, Quaternion.identity, bakeMask);
+                }
+        }
+        else
+        {
+            for (int z = 0; z < sizeZ; z++)
+                for (int y = 0; y < sizeY; y++)
+                    for (int x = 0; x < sizeX; x++)
+                    {
+                        int index = x + y * sizeX + z * sizeX * sizeY;
+                        Vector3 center = voxelData.origin +
+                            new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * voxelSize;
+
+                        tempOccupied[index] = Physics.CheckBox(
+                            center, halfExtents, Quaternion.identity, bakeMask);
+                    }
         }
 
         RestoreColliders(disabledColliders);
@@ -170,15 +214,15 @@ public class VoxelVolume : MonoBehaviour
     {
         List<Collider> disabled = new List<Collider>();
         foreach (string tag in ExcludedTags)
-        foreach (GameObject obj in GameObject.FindGameObjectsWithTag(tag))
-        foreach (Collider col in obj.GetComponentsInChildren<Collider>())
-        {
-            if (col.enabled)
-            {
-                col.enabled = false;
-                disabled.Add(col);
-            }
-        }
+            foreach (GameObject obj in GameObject.FindGameObjectsWithTag(tag))
+                foreach (Collider col in obj.GetComponentsInChildren<Collider>())
+                {
+                    if (col.enabled)
+                    {
+                        col.enabled = false;
+                        disabled.Add(col);
+                    }
+                }
         return disabled;
     }
 

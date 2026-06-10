@@ -7,17 +7,14 @@ using UnityEngine.Audio;
 /// Fires rays from the listener through the voxel grid on a background thread.
 ///
 /// Ray contribution system:
-///   - Rays continue bouncing until maxBounces regardless of LOS success
-///   - Each bounce n contributes 2^(maxBounces - n) to successSum if LOS to source is clear
-///   - maxPossible is accumulated at runtime — only bounces that actually hit a surface
-///     count toward the denominator. Rays that escape the grid without hitting anything
-///     are excluded entirely, correctly handling open worlds and outdoor environments.
-///   - If no ray hits any surface (fully open world), muffle = 0
-///   - Integer accumulation until final division — no rounding error
-///
-/// Two modes set by VoxelVolume at startup:
-///   Static  (useDynamicObstacles = OFF): reads cached BitArray directly, zero overhead
-///   Dynamic (useDynamicObstacles = ON):  snapshots combined BitArray from DynamismManager
+///   - Rays march until they hit a solid surface, come within sourceProximityRadius
+///     of the source, or escape the grid.
+///   - Proximity hit: all remaining bounce weights credited as full success, ray stops.
+///   - Solid hit: permeation factor applied to determine partial success.
+///   - maxPossible accumulated at runtime — open world correctly returns 0 muffle.
+///   - Two separate weight systems:
+///       Muffle: 2^(maxBounces - bounce) — halved per bounce
+///       Direction: 0.2^(bounce - 1) — fifthd per bounce, heavily prioritizes first bounce
 ///
 /// Muffle Ratio: 0.0 = fully clear, 1.0 = fully blocked.
 /// </summary>
@@ -33,35 +30,40 @@ public class AudioRaytracer : MonoBehaviour
     [Tooltip("Number of rays fired per update.")]
     public int rayCount = 512;
 
-    [Tooltip("How many times a ray bounces. Every bounce gets a chance to check LOS.")]
+    [Tooltip("How many times a ray bounces.")]
     public int maxBounces = 5;
 
     [Tooltip("Max voxel steps per ray segment.")]
     public int maxStepsPerSegment = 500;
 
+    [Tooltip("Radius in meters around the source. Any ray entering this radius counts as a direct hit.")]
+    public float sourceProximityRadius = 0.1f;
+
     [Header("Audio Settings")]
     public AudioMixer audioMixer;
 
     [Header("Reverb Settings")]
-    [Tooltip("Min/Max decay time in seconds mapped to short/long travel distance.")]
-    public float minDecayTime = 0.1f;
-    public float maxDecayTime = 3.0f;
-
-    [Tooltip("Min/Max reverb delay in seconds.")]
     public float minReverbDelay = 0.0f;
-    public float maxReverbDelay = 0.1f;
-
-    [Tooltip("Min/Max reflect delay in seconds.")]
-    public float minReflectDelay = 0.0f;
-    public float maxReflectDelay = 0.05f;
-
     public float delayMultiplier = 1f;
 
-    [Tooltip("Energy lost per meter of solid material. Higher = thicker effective walls.")]
+    [Tooltip("Energy lost per meter of solid material. Higher = more aggressive wall absorption.")]
     public float absorptionCoefficient = 10f;
 
-    [Tooltip("Multiplier for the muffle curve. Higher = more aggressive compression.")]
+    [Tooltip("Power applied to the raw muffle value. Higher = more forgiving at low muffle values.")]
     public float muffleCurveCoefficient = 2.5f;
+
+    [Header("Directional Settings")]
+    [Tooltip("Direction weight multiplier per bounce. 0.2 = fifth per bounce, 0.1 = tenth per bounce. Lower = first bounce dominates more.")]
+    public float directionBounceDecay = 0.2f;
+
+    [Tooltip("Direct path bias as a ratio of first-reflection pool weight. 0.1 = 10% of first reflections.")]
+    public float directBiasRatio = 0.1f;
+
+    [Tooltip("Absorption coefficient for directional bias. Lower than muffle absorption — bias survives thicker walls.")]
+    public float directAbsorptionCoefficient = 2f;
+
+    [Tooltip("Power for directional bias falloff curve. 1 = standard exponential, 2 = Gaussian (forgiving at start).")]
+    public float directAbsorptionPower = 2f;
 
     // -------------------------------------------------------------------------
     // Mode
@@ -70,8 +72,7 @@ public class AudioRaytracer : MonoBehaviour
     private BitArray _staticBits;
 
     // -------------------------------------------------------------------------
-    // Precomputed per-bounce contribution weights
-    // _bounceContributions[n-1] = 2^(maxBounces - n) for bounce n (1-indexed)
+    // Precomputed muffle bounce weights: _bounceContributions[n-1] = 2^(maxBounces - n)
     private long[] _bounceContributions;
 
     // -------------------------------------------------------------------------
@@ -92,7 +93,15 @@ public class AudioRaytracer : MonoBehaviour
     private Vector3[] _rayDirections;
     private Thread _workerThread;
 
-    private float _maxExpectedRoomSize;
+    private volatile float _perceivedDirX = 0f;
+    private volatile float _perceivedDirY = 0f;
+    private volatile float _perceivedDirZ = 0f;
+
+    private readonly object _successfulDirsLock = new object();
+    private Vector4[] _successfulRayDirs = new Vector4[0];
+
+    [HideInInspector]
+    public bool _use2DMode = false;
 
     // -------------------------------------------------------------------------
 
@@ -131,17 +140,13 @@ public class AudioRaytracer : MonoBehaviour
 
     private void InitializeShared()
     {
-        _rayDirections = GenerateFibonacciSphere(rayCount);
+        _rayDirections = _use2DMode
+            ? GenerateCircle(rayCount)
+            : GenerateFibonacciSphere(rayCount);
 
-        // Precompute bounce contributions — bounce n contributes 2^(maxBounces - n)
         _bounceContributions = new long[maxBounces];
         for (int n = 1; n <= maxBounces; n++)
             _bounceContributions[n - 1] = 1L << (maxBounces - n);
-
-        _maxExpectedRoomSize = new Vector3(
-            _voxelData.gridSize.x * _voxelData.voxelSize,
-            _voxelData.gridSize.y * _voxelData.voxelSize,
-            _voxelData.gridSize.z * _voxelData.voxelSize).magnitude;
 
         _workerThread = new Thread(RaytraceWorker);
         _workerThread.IsBackground = true;
@@ -165,30 +170,40 @@ public class AudioRaytracer : MonoBehaviour
 
         float muffle = _muffleRatio;
         float cutoff = Mathf.Lerp(500f, 22000f, 1f - muffle);
-        audioMixer.SetFloat("MuffleFrequency", cutoff);
-
-        audioMixer.SetFloat("ReverbRoom", _reverbRoom);
-        audioMixer.SetFloat("ReverbDelay", _reverbDelay);
-
-        string muffleStr = TopDownController.MuffleEnabled
-            ? $"Muffle: {muffle:F3} | Clarity: {(1f - muffle) * 100f:F1}% | Permeation: {(TopDownController.PermeationEnabled ? "On" : "Off")}"
-            : "Muffle: Disabled";
-
-        string echoStr = TopDownController.EchoEnabled
-            ? $"Reverb Room: {_reverbRoom:F1} mB | Reverb Delay: {_reverbDelay:F3} s"
-            : "Echo: Disabled";
-
-        Debug.Log($"[AudioRaytracer] {muffleStr} | {echoStr}");
-
 
         if (!TopDownController.MuffleEnabled)
-            audioMixer.SetFloat("MuffleFrequency", 22000f);
+            cutoff = 22000f;
+
+        audioMixer.SetFloat("MuffleFrequency", cutoff);
 
         if (!TopDownController.EchoEnabled)
         {
             audioMixer.SetFloat("ReverbRoom", -10000f);
             audioMixer.SetFloat("ReverbDelay", minReverbDelay);
         }
+        else
+        {
+            audioMixer.SetFloat("ReverbRoom", _reverbRoom);
+            audioMixer.SetFloat("ReverbDelay", _reverbDelay);
+        }
+
+        float solidDistance = DDATraversal.GetSolidDistance(
+            _listenerPos + ((_sourcePos - _listenerPos).normalized) * (_voxelData.voxelSize * 0.6f),
+            _sourcePos, _voxelData, _staticBits ?? DynamismManager.Instance?.SnapshotCombinedBits(),
+            maxStepsPerSegment);
+        float clearRatio = Mathf.Exp(-solidDistance * directAbsorptionCoefficient);
+
+        string muffleStr = TopDownController.MuffleEnabled
+            ? $"Muffle: {muffle:F3} | Clarity: {(1f - muffle) * 100f:F1}% | Direct Clear: {clearRatio * 100f:F1}% | Permeation: {(TopDownController.PermeationEnabled ? "On" : "Off")}"
+            : "Muffle: Disabled";
+
+        string echoStr = TopDownController.EchoEnabled
+            ? $"Reverb Room: {_reverbRoom:F1} mB | Reverb Delay: {_reverbDelay:F3} s"
+            : "Echo: Disabled";
+
+        #if UNITY_EDITOR
+        Debug.Log($"[AudioRaytracer] {muffleStr} | {echoStr}");
+        #endif
     }
 
     private void OnDestroy()
@@ -230,6 +245,11 @@ public class AudioRaytracer : MonoBehaviour
             _muffleRatio = result.muffle;
             _reverbRoom = result.reverbRoom;
             _reverbDelay = result.reverbDelay;
+            _perceivedDirX = result.perceivedDirection.x;
+            _perceivedDirY = result.perceivedDirection.y;
+            _perceivedDirZ = result.perceivedDirection.z;
+            lock (_successfulDirsLock)
+                _successfulRayDirs = result.successfulRayDirs ?? new Vector4[0];
         }
     }
 
@@ -240,6 +260,8 @@ public class AudioRaytracer : MonoBehaviour
         public float muffle;
         public float reverbRoom;
         public float reverbDelay;
+        public Vector3 perceivedDirection;
+        public Vector4[] successfulRayDirs;
     }
 
     private AudioResult CalculateAudioProperties(Vector3 sourcePos, Vector3 listenerPos, BitArray voxelBits)
@@ -248,6 +270,11 @@ public class AudioRaytracer : MonoBehaviour
         long maxPossible = 0;
         long echoSuccessCount = 0;
         float totalEchoDistance = 0f;
+        Vector3 weightedDirSum = Vector3.zero;
+        float totalDirWeight = 0f;
+
+        Vector3 directDir = (sourcePos - listenerPos).normalized;
+        var successfulDirs = new System.Collections.Generic.List<Vector4>();
 
         for (int i = 0; i < _rayDirections.Length; i++)
         {
@@ -261,17 +288,38 @@ public class AudioRaytracer : MonoBehaviour
                     direction,
                     _voxelData,
                     voxelBits,
-                    maxStepsPerSegment);
+                    maxStepsPerSegment,
+                    sourcePos,
+                    sourceProximityRadius);
 
-                // Ray escaped the grid without hitting anything —
-                // this bounce and all remaining bounces are excluded from the denominator
-                if (!march.hitSolid)
+                // Ray escaped — no more bounces possible
+                if (march.escaped)
                     break;
 
-                // This bounce hit a surface — it counts toward the denominator
-                // regardless of whether LOS to the source succeeds
-                long weight = _bounceContributions[bounce - 1];
-                maxPossible += weight;
+                // Proximity hit — ray reached the source zone
+                // Credit all remaining bounces as full success and stop
+                if (march.hitProximity)
+                {
+                    for (int remaining = bounce; remaining <= maxBounces; remaining++)
+                    {
+                        long w = _bounceContributions[remaining - 1];
+                        maxPossible += w;
+                        successSum += w;
+                    }
+
+                    // Direction: heavily weight first bounce, fifth per bounce after
+                    float dirWeight = Mathf.Pow(directionBounceDecay, bounce - 1);
+                    weightedDirSum += _rayDirections[i] * dirWeight;
+                    totalDirWeight += dirWeight;
+
+                    if (bounce == 1) successfulDirs.Add(new Vector4(_rayDirections[i].x, _rayDirections[i].y, _rayDirections[i].z, 1.0f));
+
+                    break;
+                }
+
+                // Solid hit — apply permeation or LOS check
+                long muffleWeight = _bounceContributions[bounce - 1];
+                maxPossible += muffleWeight;
 
                 Vector3 losOrigin = march.hitPoint + march.normal * (_voxelData.voxelSize * 0.6f);
 
@@ -285,7 +333,14 @@ public class AudioRaytracer : MonoBehaviour
                             losOrigin, sourcePos, _voxelData, voxelBits,
                             maxStepsPerSegment) ? 1f : 0f);
 
-                    successSum += (long)(weight * permeation);
+                    successSum += (long)(muffleWeight * permeation);
+
+                    // Direction weight: separate from muffle, fifthd per bounce
+                    float dirWeight = permeation * Mathf.Pow(directionBounceDecay, bounce);
+                    weightedDirSum += _rayDirections[i] * dirWeight;
+                    totalDirWeight += dirWeight;
+
+                    if (permeation > 0.5f && bounce == 1) successfulDirs.Add(new Vector4(_rayDirections[i].x, _rayDirections[i].y, _rayDirections[i].z, directionBounceDecay));
                 }
 
                 if (TopDownController.EchoEnabled)
@@ -299,8 +354,25 @@ public class AudioRaytracer : MonoBehaviour
                     }
                 }
 
-                direction = Vector3.Reflect(direction, march.normal);
+                direction = _use2DMode
+                    ? new Vector3(direction.x, 0f, direction.z).normalized
+                    : Vector3.Reflect(direction, march.normal);
                 currentOrigin = march.hitPoint + march.normal * (_voxelData.voxelSize * 0.1f);
+            }
+        }
+
+        if (TopDownController.MuffleEnabled)
+        {
+            Vector3 directLosOrigin = listenerPos + directDir * (_voxelData.voxelSize * 0.6f);
+            float solidDistance = DDATraversal.GetSolidDistance(directLosOrigin, sourcePos, _voxelData, voxelBits, maxStepsPerSegment);
+            float directPermeation = Mathf.Exp(-Mathf.Pow(solidDistance * directAbsorptionCoefficient, directAbsorptionPower));
+
+            if (directPermeation > 0f)
+            {
+                float firstReflectionPool = rayCount * directionBounceDecay;
+                float biasWeight = directBiasRatio * firstReflectionPool * directPermeation;
+                weightedDirSum += directDir * biasWeight;
+                totalDirWeight += biasWeight;
             }
         }
 
@@ -316,11 +388,22 @@ public class AudioRaytracer : MonoBehaviour
         float room = Mathf.Lerp(-10000f, 0f, echoRatio);
         float reverbDelay = Mathf.Min(delayMultiplier * avgDistance / 343f, 0.1f);
 
+        Vector3 perceivedRaw = totalDirWeight > 0f
+            ? weightedDirSum / totalDirWeight
+            : directDir;
+
+        if (_use2DMode)
+            perceivedRaw.y = 0f;
+
+        Vector3 perceived = perceivedRaw.normalized;
+
         return new AudioResult
         {
             muffle = muffle,
             reverbRoom = room,
             reverbDelay = reverbDelay,
+            perceivedDirection = perceived,
+            successfulRayDirs = successfulDirs.ToArray()
         };
     }
 
@@ -345,5 +428,53 @@ public class AudioRaytracer : MonoBehaviour
         }
 
         return directions;
+    }
+
+    private Vector3[] GenerateCircle(int n)
+    {
+        Vector3[] directions = new Vector3[n];
+        for (int i = 0; i < n; i++)
+        {
+            float angle = (float)i / n * Mathf.PI * 2f;
+            directions[i] = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+        }
+        return directions;
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (_listener == null) return;
+
+        Vector4[] dirs;
+        lock (_successfulDirsLock)
+            dirs = _successfulRayDirs;
+
+        Gizmos.color = Color.cyan;
+        foreach (Vector4 d in dirs)
+        {
+            Vector3 dir = new Vector3(d.x, d.y, d.z);
+            float length = 3f * d.w;
+            Gizmos.DrawLine(_listener.position, _listener.position + dir * length);
+        }
+
+        Vector3 perceivedDir = new Vector3(_perceivedDirX, _perceivedDirY, _perceivedDirZ);
+        if (perceivedDir != Vector3.zero)
+        {
+            Gizmos.color = Color.yellow;
+            Vector3 start = _listener.position;
+            Vector3 end = start + perceivedDir * 3f;
+
+            Vector3 perp1 = Vector3.Cross(perceivedDir, Vector3.up).normalized;
+            if (perp1.magnitude < 0.01f)
+                perp1 = Vector3.Cross(perceivedDir, Vector3.right).normalized;
+            Vector3 perp2 = Vector3.Cross(perceivedDir, perp1).normalized;
+
+            float thickness = 0.05f;
+            Gizmos.DrawLine(start, end);
+            Gizmos.DrawLine(start + perp1 * thickness, end + perp1 * thickness);
+            Gizmos.DrawLine(start - perp1 * thickness, end - perp1 * thickness);
+            Gizmos.DrawLine(start + perp2 * thickness, end + perp2 * thickness);
+            Gizmos.DrawLine(start - perp2 * thickness, end - perp2 * thickness);
+        }
     }
 }
