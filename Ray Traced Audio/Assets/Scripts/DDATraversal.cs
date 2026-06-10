@@ -178,9 +178,12 @@ public static class DDATraversal
             if (tCurrent > totalDistance)
                 return true;
 
-            int index = x + y * grid.gridSize.x + z * grid.gridSize.x * grid.gridSize.y;
-            if (voxelBits[index])
-                return false;
+            if (i > 0)  // skip the origin voxel always
+            {
+                int index = x + y * grid.gridSize.x + z * grid.gridSize.x * grid.gridSize.y;
+                if (voxelBits[index])
+                    return false; // or solidDistance += / solidVoxels++ in the other two
+            }
 
             if (tMaxX < tMaxY && tMaxX < tMaxZ)
             {

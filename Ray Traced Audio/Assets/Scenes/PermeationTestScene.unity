@@ -1832,7 +1832,7 @@ MonoBehaviour:
   listenerTag: SoundListener
   rayCount: 512
   maxBounces: 10
-  maxStepsPerSegment: 500
+  maxStepsPerSegment: 5000
   sourceProximityRadius: 0.5
   audioMixer: {fileID: 24100000, guid: 1bfe111b73fc6c84fa3a14d3cee6206d, type: 2}
   minReverbDelay: 0

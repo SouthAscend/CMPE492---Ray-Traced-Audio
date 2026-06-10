@@ -447,6 +447,7 @@ public class AudioRaytracer : MonoBehaviour
     private void OnDrawGizmos()
     {
         if (_listener == null) return;
+        if (!TopDownController.DirectionGizmoEnabled) return;
 
         Vector4[] dirs;
         lock (_successfulDirsLock)

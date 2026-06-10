@@ -22,6 +22,7 @@ public class TopDownController : MonoBehaviour
     public static bool MuffleEnabled = true;
     public static bool EchoEnabled = true;
     public static bool PermeationEnabled = true;
+    public static bool DirectionGizmoEnabled = false;
 
     private void Start()
     {
@@ -44,6 +45,9 @@ public class TopDownController : MonoBehaviour
 
         if (kb.digit3Key.wasPressedThisFrame)
             PermeationEnabled = !PermeationEnabled;
+
+        if (kb.digit4Key.wasPressedThisFrame)
+            DirectionGizmoEnabled = !DirectionGizmoEnabled;
 
         float h = 0f;
         float v = 0f;
